@@ -1,39 +1,84 @@
 # processor.py : Agrégation, filtrage, jointure CO2
 import pandas as pd
-from rich.console import Console
 from typing import List
 from co2tool.core.config import CO2ConfigFile
+from co2tool.utils import logger
 
-console = Console()
-
-def process_billing_with_co2(df_billing: pd.DataFrame, df_co2: pd.DataFrame) -> pd.DataFrame:
+def process_billing_with_co2(df_billing: pd.DataFrame, df_co2: pd.DataFrame, filter_missing_articles: bool = True) -> pd.DataFrame:
     """
-    Fusionne les factures avec la config CO2 (DataFrame), filtre et calcule les émissions.
-    Toutes les colonnes de la config CO2 (ex: CM, Nom_Cat) sont propagées dans le résultat.
+    Fusionne les factures avec la config CO2 (DataFrame), applique les facteurs CO2 et calcule les émissions.
+    Gère également le cas où le fichier d'entrée contient déjà des colonnes de traitement CO2.
+    
+    Args:
+        df_billing: DataFrame des factures
+        df_co2: DataFrame de la configuration CO2
+        filter_missing_articles: Si True, supprime les lignes dont le numéro d'article n'est pas dans la config CO2
+                                Si False, conserve toutes les lignes, même sans correspondance CO2
+    
+    Returns:
+        DataFrame traité avec calcul des émissions CO2
     """
+    # Vérifier si le fichier contient déjà des colonnes de traitement CO2
+    fichier_deja_traite = "facteur_emission_co2" in df_billing.columns
+    
+    if fichier_deja_traite:
+        logger.info("Fichier déjà traité détecté, réapplication des facteurs CO2")
+        # Supprimer les colonnes de traitement CO2 existantes pour éviter les doublons
+        colonnes_a_supprimer = ["facteur_emission_co2", "emission_co2"]
+        df_billing = df_billing.drop(columns=[col for col in colonnes_a_supprimer if col in df_billing.columns])
+    
     # Cast pour jointure robuste
     df_billing["numero_article"] = df_billing["numero_article"].astype(str)
     df_co2["numero_article"] = df_co2["numero_article"].astype(str)
-    # Jointure gauche
+    
+    # Jointure gauche pour conserver toutes les factures
     merged = pd.merge(df_billing, df_co2, on="numero_article", how="left")
     avant_filtrage = len(merged)
-    # Filtrer uniquement les lignes avec facteur CO2 non nul
-    filtered = merged[merged["facteur_emission_co2"].notnull()].copy()
-    apres_filtrage = len(filtered)
-    # Calcul émissions
+    
+    # Vérifier si la colonne facteur_emission_co2 existe après la fusion
+    if "facteur_emission_co2" not in merged.columns:
+        # Si la colonne n'existe pas, c'est que la configuration CO2 n'a pas cette colonne
+        # Ajouter une colonne vide pour éviter les erreurs
+        logger.warning("La colonne 'facteur_emission_co2' n'existe pas dans la configuration CO2")
+        merged["facteur_emission_co2"] = 0
+        result_df = merged.copy()
+    else:
+        # Traitement normal avec la colonne facteur_emission_co2
+        if filter_missing_articles:
+            # Mode standard: on filtre pour ne garder que les lignes avec facteur CO2 non nul
+            result_df = merged[merged["facteur_emission_co2"].notnull()].copy()
+            apres_filtrage = len(result_df)
+            logger.info(f"Filtrage actif: {avant_filtrage-apres_filtrage} lignes sans correspondance CO2 supprimées")
+        else:
+            # Mode nouveau: on garde toutes les lignes, même celles sans facteur CO2
+            result_df = merged.copy()
+            nb_sans_co2 = merged["facteur_emission_co2"].isnull().sum()
+            logger.info(f"Filtrage inactif: conservation de {nb_sans_co2} lignes sans correspondance CO2")
+    
+    # Remplacer les valeurs nulles par 0 pour le calcul des émissions
+    result_df["facteur_emission_co2"] = result_df["facteur_emission_co2"].fillna(0)
+    
     # Log des valeurs non convertibles en float pour facteur_emission_co2
-    not_float_mask = filtered["facteur_emission_co2"].apply(lambda x: pd.api.types.is_number(x) or (isinstance(x, float) or isinstance(x, int))) == False
     try:
-        filtered["facteur_emission_co2"] = filtered["facteur_emission_co2"].astype(float)
+        result_df["facteur_emission_co2"] = result_df["facteur_emission_co2"].astype(float)
     except Exception as e:
-        for idx, val in filtered.loc[~filtered["facteur_emission_co2"].apply(lambda x: isinstance(x, float) or isinstance(x, int)), "facteur_emission_co2"].items():
+        for idx, val in result_df.loc[~result_df["facteur_emission_co2"].apply(
+            lambda x: isinstance(x, float) or isinstance(x, int) or pd.isna(x)), "facteur_emission_co2"].items():
             try:
                 float(val)
             except Exception:
-                console.log(f"[red]Ligne {idx+2} : facteur_emission_co2 non convertible : '{val}'\nContenu complet : {filtered.loc[idx].to_dict()}")
+                logger.error(f"Ligne {idx+2} : facteur_emission_co2 non convertible : '{val}'")
+                logger.debug(f"Contenu complet de la ligne: {result_df.loc[idx].to_dict()}")
         raise
-    filtered["quantite"] = filtered["quantite"].astype(float)
-    filtered["emission_co2"] = filtered["quantite"] * filtered["facteur_emission_co2"]
-    console.log(f"[cyan]Factures fusionnées : {avant_filtrage} lignes, après filtrage CO2 : {apres_filtrage} lignes")
-    return filtered.reset_index(drop=True)
+    
+    # Calcul des émissions
+    result_df["quantite"] = result_df["quantite"].astype(float)
+    result_df["emission_co2"] = result_df["quantite"] * result_df["facteur_emission_co2"]
+    
+    if filter_missing_articles:
+        logger.info(f"Factures traitées: {avant_filtrage} lignes initiales, {len(result_df)} lignes après filtrage CO2")
+    else:
+        logger.info(f"Factures traitées: {avant_filtrage} lignes, aucun filtrage appliqué")
+        
+    return result_df.reset_index(drop=True)
 
