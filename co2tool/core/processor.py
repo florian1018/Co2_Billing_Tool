@@ -73,7 +73,32 @@ def process_billing_with_co2(df_billing: pd.DataFrame, df_co2: pd.DataFrame, fil
     
     # Calcul des émissions
     result_df["quantite"] = result_df["quantite"].astype(float)
-    result_df["emission_co2"] = result_df["quantite"] * result_df["facteur_emission_co2"]
+    
+    # S'assurer que la colonne prix est au format numérique
+    if "prix" in result_df.columns:
+        result_df["prix"] = result_df["prix"].astype(float)
+        
+        # Appliquer un facteur négatif si le prix est négatif (retour)
+        # Créer une colonne temporaire pour le signe
+        result_df["signe_prix"] = result_df["prix"].apply(lambda x: -1 if x < 0 else 1)
+        
+        # Appliquer le signe au facteur d'émission
+        result_df["facteur_emission_co2_ajuste"] = result_df["facteur_emission_co2"] * result_df["signe_prix"]
+        
+        # Calcul des émissions avec le facteur ajusté
+        result_df["emission_co2"] = result_df["quantite"] * result_df["facteur_emission_co2_ajuste"]
+        
+        # Supprimer les colonnes temporaires
+        result_df = result_df.drop(columns=["signe_prix", "facteur_emission_co2_ajuste"])
+        
+        # Log des retours détectés
+        nb_retours = (result_df["prix"] < 0).sum()
+        if nb_retours > 0:
+            logger.info(f"Détection de {nb_retours} lignes de retour (prix négatif) avec facteur d'émission inversé")
+    else:
+        # Si la colonne prix n'est pas disponible, calcul standard
+        logger.warning("Colonne 'prix' non disponible, impossible de détecter les retours")
+        result_df["emission_co2"] = result_df["quantite"] * result_df["facteur_emission_co2"]
     
     if filter_missing_articles:
         logger.info(f"Factures traitées: {avant_filtrage} lignes initiales, {len(result_df)} lignes après filtrage CO2")

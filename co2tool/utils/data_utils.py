@@ -1,4 +1,5 @@
 # data_utils.py : Utilitaires de traitement de données
+import re
 import pandas as pd
 import datetime
 from typing import Optional, Union, Tuple
@@ -57,6 +58,23 @@ def load_csv_with_encoding(file_path: Union[str, Path], sep: str = ';', **kwargs
     
     # Si on arrive ici, aucun encodage n'a fonctionné
     raise UnicodeDecodeError(f"Impossible de charger {file_path} avec les encodages disponibles: {encodings}")
+
+def clean_numero_article_column(df: pd.DataFrame, col: str = "numero_article") -> pd.DataFrame:
+    """
+    Nettoie la colonne des numéros d'article en supprimant les zéros initiaux.
+    Les numéros d'article ne commencent jamais par zéro (ex : "0000001234567" -> "1234567").
+    Args:
+        df: DataFrame à nettoyer
+        col: Nom de la colonne à nettoyer
+    Returns:
+        DataFrame avec la colonne nettoyée
+    """
+    if col not in df.columns:
+        return df
+    result = df.copy()
+    # On force le type str pour éviter les erreurs
+    result[col] = result[col].astype(str).apply(lambda x: re.sub(r'^0+(\d+)$', r'\1', x) if x.isdigit() else x)
+    return result
 
 def clean_quantity_column(df: pd.DataFrame, col: str = "quantite") -> pd.DataFrame:
     """

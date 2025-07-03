@@ -55,6 +55,9 @@ def load_billing_csv_files(file_paths: List[Path]) -> Tuple[pd.DataFrame, Dict[s
                 if not required_cols.issubset(df.columns):
                     raise ValueError(f"Colonnes internes requises manquantes {required_cols - set(df.columns)}")
             
+            # Nettoyage des numéros d'article (suppression des zéros initiaux)
+            from co2tool.utils.data_utils import clean_numero_article_column
+            df = clean_numero_article_column(df, col="numero_article")
             # Nettoyage des colonnes numériques
             df = clean_quantity_column(df, col="quantite")
             
@@ -138,6 +141,9 @@ def load_co2_config_csv(config_path: Path) -> pd.DataFrame:
         else:
             raise ValueError(f"Colonnes attendues : ['numero_article', 'facteur_emission_co2'] ou ['Num_art', 'FE'], trouvé : {list(df.columns)}")
         
+        # Nettoyage des numéros d'article (suppression des zéros initiaux)
+        from co2tool.utils.data_utils import clean_numero_article_column
+        df = clean_numero_article_column(df, col="numero_article")
         # Conversion du facteur d'émission avec la fonction utilitaire
         df["facteur_emission_co2"] = df["facteur_emission_co2"].apply(parse_float)
         

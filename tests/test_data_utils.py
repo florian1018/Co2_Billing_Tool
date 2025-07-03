@@ -2,7 +2,7 @@
 import unittest
 import pandas as pd
 from datetime import datetime
-from co2tool.utils.data_utils import filter_data_by_date_range, parse_float, parse_date
+from co2tool.utils.data_utils import filter_data_by_date_range, parse_float, parse_date, clean_numero_article_column
 from co2tool.utils import logger
 
 # Configurer le logger pour les tests
@@ -53,6 +53,16 @@ class TestNumericConversion(unittest.TestCase):
         self.assertIsNone(parse_date("abc"))
         self.assertIsNone(parse_date(""))
         self.assertIsNone(parse_date(None))
+
+
+class TestNumeroArticleCleaning(unittest.TestCase):
+    """Tests pour la suppression des zéros initiaux dans numero_article"""
+    def test_clean_numero_article_column(self):
+        df = pd.DataFrame({
+            "numero_article": ["00001234567", "1234567", "000000000001234567", "1000123", "0000000", "abc123", "0123abc", "0"]
+        })
+        cleaned = clean_numero_article_column(df, col="numero_article")
+        self.assertEqual(cleaned["numero_article"].tolist(), ["1234567", "1234567", "1234567", "1000123", "0", "abc123", "0123abc", "0"])
 
 
 class TestDateRangeFiltering(unittest.TestCase):
