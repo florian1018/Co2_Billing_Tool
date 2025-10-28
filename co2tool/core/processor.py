@@ -3,6 +3,7 @@ import pandas as pd
 from typing import List
 from co2tool.core.config import CO2ConfigFile
 from co2tool.utils import logger
+import numpy as np
 
 def process_billing_with_co2(df_billing: pd.DataFrame, df_co2: pd.DataFrame, filter_missing_articles: bool = True) -> pd.DataFrame:
     """
@@ -30,6 +31,26 @@ def process_billing_with_co2(df_billing: pd.DataFrame, df_co2: pd.DataFrame, fil
     # Cast pour jointure robuste
     df_billing["numero_article"] = df_billing["numero_article"].astype(str)
     df_co2["numero_article"] = df_co2["numero_article"].astype(str)
+    
+    # Vérification des doublons dans le fichier de configuration CO2
+    doublons_co2 = df_co2[df_co2.duplicated(subset=["numero_article"], keep=False)]
+    if len(doublons_co2) > 0:
+        logger.warning(f"Détection de {len(doublons_co2)} lignes avec des numéros d'article dupliqués dans le fichier de configuration CO2")
+        # Pour chaque numéro d'article dupliqué, nous gardons la ligne avec le facteur d'émission le plus élevé
+        # Créer un DataFrame intermédiaire avec les facteurs max par numéro d'article
+        max_factors = df_co2.groupby("numero_article")["facteur_emission_co2"].max().reset_index()
+        # Log des détails des doublons pour diagnostic
+        for article in doublons_co2["numero_article"].unique():
+            doublons_article = df_co2[df_co2["numero_article"] == article]
+            factors = doublons_article["facteur_emission_co2"].tolist()
+            logger.debug(f"Article {article} : facteurs trouvés {factors}, valeur maximum retenue : {max(factors)}")
+        
+        # Fusionner pour récupérer les lignes avec les facteurs maximums
+        df_co2 = pd.merge(max_factors, df_co2, on=["numero_article", "facteur_emission_co2"], how="left")
+        # Supprimer les doublons restants (au cas où plusieurs lignes auraient le même facteur maximum)
+        df_co2 = df_co2.drop_duplicates(subset=["numero_article"])
+        
+        logger.info(f"Après dédoublonnage, le fichier de configuration CO2 contient {len(df_co2)} entrées uniques")
     
     # Jointure gauche pour conserver toutes les factures
     merged = pd.merge(df_billing, df_co2, on="numero_article", how="left")
